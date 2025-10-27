@@ -133,9 +133,25 @@ app.post('/api/transfer', authMiddleware, (req,res)=>{
 
 app.get('/api/transactions', authMiddleware, (req,res)=>{
   const id = req.user.id;
-  db.all('SELECT * FROM transactions WHERE from_user = ? OR to_user = ? ORDER BY created_at DESC', [id,id], (err,rows)=>{
+  // return transactions with human-friendly usernames when possible
+  db.all(`SELECT t.*, fu.username as from_username, tu.username as to_username
+          FROM transactions t
+          LEFT JOIN users fu ON fu.id = t.from_user
+          LEFT JOIN users tu ON tu.id = t.to_user
+          WHERE t.from_user = ? OR t.to_user = ?
+          ORDER BY t.created_at DESC`, [id,id], (err,rows)=>{
     if (err) return res.status(500).json({error:err.message});
     res.json({transactions:rows});
+  });
+});
+
+// lookup user by username or id
+app.get('/api/users/:identifier', authMiddleware, (req,res)=>{
+  const ident = req.params.identifier;
+  db.get('SELECT id,username,email,balance FROM users WHERE username = ? OR id = ?', [ident,ident], (err,row)=>{
+    if (err) return res.status(500).json({error:err.message});
+    if (!row) return res.status(404).json({error:'user not found'});
+    res.json({user:row});
   });
 });
 

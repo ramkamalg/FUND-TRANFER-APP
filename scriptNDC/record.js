@@ -306,6 +306,8 @@ async function loadProfile(){
     const user = data.user;
     // show basic info in page title
     document.title = (user.username || 'User') + ' — Fund Transfer';
+    const balEl = document.getElementById('balanceDisplay');
+    if (balEl) balEl.innerText = 'Balance: ' + (user.balance!=null ? user.balance : '—');
   }catch(e){ console.error(e); }
 }
 
