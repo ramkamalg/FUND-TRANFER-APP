@@ -1,9 +1,10 @@
 const path = require('path');
 const fs = require('fs');
 const request = require('supertest');
-const { app, db, ready } = require('../server');
-
 const TEST_DB = path.join(__dirname, 'test.sqlite');
+let app;
+let db;
+let ready;
 
 beforeAll(async () => {
   if (fs.existsSync(TEST_DB)) {
@@ -12,6 +13,7 @@ beforeAll(async () => {
   process.env.DB_FILE = TEST_DB;
   process.env.JWT_SECRET = 'test-secret';
   process.env.DEFAULT_SEED_PASSWORD = 'password';
+  ({ app, db, ready } = require('../server'));
   await ready;
 });
 
@@ -29,7 +31,18 @@ describe('Fund transfer API', () => {
       .expect(200);
 
     expect(res.body.token).toBeDefined();
+    expect(res.body.usernameDisplay).toBe('Alice');
     token = res.body.token;
+  });
+
+  test('login is case-insensitive and trims whitespace', async () => {
+    const res = await request(app)
+      .post('/api/login')
+      .send({ username: '  ALICE ', password: 'password' })
+      .expect(200);
+
+    expect(res.body.token).toBeDefined();
+    expect(res.body.usernameDisplay).toBe('Alice');
   });
 
   test('get profile', async () => {
@@ -39,6 +52,7 @@ describe('Fund transfer API', () => {
       .expect(200);
 
     expect(res.body.user.username).toBe('alice');
+    expect(res.body.user.usernameDisplay).toBe('Alice');
   });
 
   test('transfer funds to bob', async () => {
@@ -60,5 +74,7 @@ describe('Fund transfer API', () => {
 
     expect(Array.isArray(res.body.transactions)).toBe(true);
     expect(res.body.transactions.length).toBeGreaterThan(0);
+    const firstTx = res.body.transactions[0];
+    expect(firstTx.counterparty).toBe('Bob');
   });
 });

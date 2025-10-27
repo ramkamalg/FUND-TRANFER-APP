@@ -369,7 +369,7 @@ async function loadProfile() {
     const data = await res.json();
     const user = data.user || {};
     if (userDisplayEl) {
-      userDisplayEl.textContent = user.username || user.email || 'Unknown user';
+      userDisplayEl.textContent = user.usernameDisplay || user.username || user.email || 'Unknown user';
     }
     if (balanceEl) {
       const formatted = formatAmount(user.balance, user.balance);

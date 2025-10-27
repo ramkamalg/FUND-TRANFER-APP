@@ -3,7 +3,7 @@ const loginForm = document.getElementById('login-form');
 if (loginForm) {
   loginForm.addEventListener('submit', async (e) => {
     e.preventDefault();
-    const username = document.getElementById('username').value;
+    const username = document.getElementById('username').value.trim();
     const password = document.getElementById('password').value;
 
     try {
@@ -29,8 +29,8 @@ const regForm = document.getElementById('register-form');
 if (regForm){
   regForm.addEventListener('submit', async (e) =>{
     e.preventDefault();
-    const username = document.getElementById('reg_username').value;
-    const email = document.getElementById('reg_email').value;
+    const username = document.getElementById('reg_username').value.trim();
+    const email = document.getElementById('reg_email').value.trim();
     const password = document.getElementById('reg_password').value;
     try{
       const res = await fetch('/api/register', {

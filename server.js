@@ -24,6 +24,9 @@ try {
 
 const formatCurrency = (value) => currencyFormatter.format(Number(value || 0));
 
+const normalize = (value) => (value || '').trim();
+const normalizeLower = (value) => normalize(value).toLowerCase();
+
 // ensure database exists
 const db = new sqlite3.Database(DB_FILE);
 
@@ -33,6 +36,7 @@ function initializeDatabase() {
       db.run(`CREATE TABLE IF NOT EXISTS users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         username TEXT UNIQUE,
+        username_display TEXT,
         email TEXT UNIQUE,
         password_hash TEXT,
         balance REAL DEFAULT 0
@@ -51,21 +55,43 @@ function initializeDatabase() {
         FOREIGN KEY(to_user) REFERENCES users(id)
       )`, err => err && reject(err));
 
-      db.get('SELECT COUNT(*) as cnt FROM users', (err, row) => {
-        if (err) return reject(err);
-        if (row.cnt === 0) {
-          bcrypt.hash(DEFAULT_SEED_PASSWORD, 10).then(hash => {
-            db.run('INSERT INTO users (username, email, password_hash, balance) VALUES (?,?,?,?)', ['alice','alice@example.com',hash,10000], (err) => {
+      const ensureDisplayColumn = () => {
+        db.run(
+          'UPDATE users SET username_display = username WHERE username_display IS NULL OR username_display = ""',
+          updateErr => {
+            if (updateErr) return reject(updateErr);
+
+            db.get('SELECT COUNT(*) as cnt FROM users', (err, row) => {
               if (err) return reject(err);
-              db.run('INSERT INTO users (username, email, password_hash, balance) VALUES (?,?,?,?)', ['bob','bob@example.com',hash,5000], (err) => {
-                if (err) return reject(err);
-                console.log(`Seeded demo users: alice / bob (password: ${DEFAULT_SEED_PASSWORD})`);
+              if (row.cnt === 0) {
+                bcrypt.hash(DEFAULT_SEED_PASSWORD, 10).then(hash => {
+                  db.run('INSERT INTO users (username, username_display, email, password_hash, balance) VALUES (?,?,?,?,?)', ['alice','Alice','alice@example.com',hash,10000], (err) => {
+                    if (err) return reject(err);
+                    db.run('INSERT INTO users (username, username_display, email, password_hash, balance) VALUES (?,?,?,?,?)', ['bob','Bob','bob@example.com',hash,5000], (err) => {
+                      if (err) return reject(err);
+                      console.log(`Seeded demo users: alice / bob (password: ${DEFAULT_SEED_PASSWORD})`);
+                      resolve();
+                    });
+                  });
+                }).catch(reject);
+              } else {
                 resolve();
-              });
+              }
             });
-          }).catch(reject);
+          }
+        );
+      };
+
+      db.all('PRAGMA table_info(users)', (infoErr, columns) => {
+        if (infoErr) return reject(infoErr);
+        const hasDisplay = columns.some(col => col.name === 'username_display');
+        if (hasDisplay) {
+          ensureDisplayColumn();
         } else {
-          resolve();
+          db.run('ALTER TABLE users ADD COLUMN username_display TEXT', alterErr => {
+            if (alterErr) return reject(alterErr);
+            ensureDisplayColumn();
+          });
         }
       });
     });
@@ -95,33 +121,46 @@ function authMiddleware(req,res,next){
 }
 
 app.post('/api/register', async (req,res)=>{
-  const {username,email,password} = req.body;
-  if (!username || !password) return res.status(400).json({error:'username and password required'});
+  const displayUsername = normalize(req.body.username);
+  const rawUsername = normalizeLower(req.body.username);
+  const rawEmail = normalizeLower(req.body.email);
+  const password = normalize(req.body.password);
+
+  if (!rawUsername || !password) {
+    return res.status(400).json({error:'username and password required'});
+  }
+
   const hash = await bcrypt.hash(password,10);
-  db.run('INSERT INTO users (username,email,password_hash,balance) VALUES (?,?,?,?)',[username,email||null,hash,0], function(err){
+  db.run('INSERT INTO users (username, username_display, email, password_hash, balance) VALUES (?,?,?,?,?)',[rawUsername, displayUsername || rawUsername, rawEmail || null, hash,0], function(err){
     if (err) return res.status(400).json({error: err.message});
     const id = this.lastID;
-    const token = jwt.sign({id,username}, SECRET, {expiresIn:'7d'});
-    res.json({token});
+    const token = jwt.sign({id,username:rawUsername,displayName:displayUsername || rawUsername}, SECRET, {expiresIn:'7d'});
+    res.json({
+      token,
+      username: rawUsername,
+      usernameDisplay: displayUsername || rawUsername
+    });
   });
 });
 
 app.post('/api/login', (req,res)=>{
-  const {username,password} = req.body;
-  if (!username || !password) return res.status(400).json({error:'username and password required'});
-  db.get('SELECT * FROM users WHERE username = ? OR email = ?',[username,username], async (err,row)=>{
+  const identifier = normalizeLower(req.body.username || req.body.email);
+  const password = normalize(req.body.password);
+  if (!identifier || !password) return res.status(400).json({error:'username/email and password required'});
+  db.get('SELECT * FROM users WHERE LOWER(username) = ? OR LOWER(email) = ?',[identifier,identifier], async (err,row)=>{
     if (err) return res.status(500).json({error:err.message});
     if (!row) return res.status(400).json({error:'invalid credentials'});
     const ok = await bcrypt.compare(password, row.password_hash);
     if (!ok) return res.status(400).json({error:'invalid credentials'});
-    const token = jwt.sign({id:row.id,username:row.username}, SECRET, {expiresIn:'7d'});
-    res.json({token});
+    const displayName = row.username_display || row.username;
+    const token = jwt.sign({id:row.id,username:row.username,displayName}, SECRET, {expiresIn:'7d'});
+    res.json({token, username: row.username, usernameDisplay: displayName});
   });
 });
 
 app.get('/api/me', authMiddleware, (req,res)=>{
   const id = req.user.id;
-  db.get('SELECT id,username,email,balance FROM users WHERE id = ?', [id], (err,row)=>{
+  db.get('SELECT id,username,username_display AS usernameDisplay,email,balance FROM users WHERE id = ?', [id], (err,row)=>{
     if (err) return res.status(500).json({error:err.message});
     res.json({user:row});
   });
@@ -129,12 +168,22 @@ app.get('/api/me', authMiddleware, (req,res)=>{
 
 app.post('/api/transfer', authMiddleware, (req,res)=>{
   const fromId = req.user.id;
-  const {to_account,amount,note} = req.body;
+  const { amount, note } = req.body;
+  const toAccountRaw = normalize(req.body.to_account);
+  const toAccountLower = normalizeLower(req.body.to_account);
   const amt = Number(amount);
-  if (!to_account || !amt || amt<=0) return res.status(400).json({error:'invalid payload'});
+  if (!toAccountRaw || !amt || amt<=0) return res.status(400).json({error:'invalid payload'});
 
-  // find recipient by username or id
-  db.get('SELECT * FROM users WHERE username = ? OR id = ?', [to_account,to_account], (err,recipient)=>{
+  const idCandidate = Number(toAccountRaw);
+  const lookupParams = [toAccountLower, toAccountLower];
+  let lookupQuery = 'SELECT * FROM users WHERE LOWER(username) = ? OR LOWER(email) = ?';
+  if (Number.isInteger(idCandidate)) {
+    lookupQuery += ' OR id = ?';
+    lookupParams.push(idCandidate);
+  }
+
+  // find recipient by username/email/id
+  db.get(lookupQuery, lookupParams, (err,recipient)=>{
     if (err) return res.status(500).json({error:err.message});
     if (!recipient) return res.status(400).json({error:'recipient not found'});
     // check sender balance
@@ -157,7 +206,7 @@ app.post('/api/transfer', authMiddleware, (req,res)=>{
               return res.status(500).json({error:creditErr.message});
             }
 
-            db.run('INSERT INTO transactions (from_user,to_user,to_account,amount,type,note) VALUES (?,?,?,?,?,?)', [fromId, recipient.id, String(recipient.username), amt, 'transfer', note||null], function(err){
+            db.run('INSERT INTO transactions (from_user,to_user,to_account,amount,type,note) VALUES (?,?,?,?,?,?)', [fromId, recipient.id, String(recipient.username_display || recipient.username || toAccountRaw), amt, 'transfer', note||null], function(err){
               if (err){
                 db.run('ROLLBACK');
                 return res.status(500).json({error:err.message});
@@ -190,7 +239,8 @@ app.post('/api/transfer', authMiddleware, (req,res)=>{
 app.get('/api/transactions', authMiddleware, (req,res)=>{
   const id = req.user.id;
   // return transactions with human-friendly usernames when possible
-  db.all(`SELECT t.*, fu.username as from_username, tu.username as to_username
+  db.all(`SELECT t.*, fu.username as from_username, fu.username_display as from_username_display,
+          tu.username as to_username, tu.username_display as to_username_display
           FROM transactions t
           LEFT JOIN users fu ON fu.id = t.from_user
           LEFT JOIN users tu ON tu.id = t.to_user
@@ -199,7 +249,9 @@ app.get('/api/transactions', authMiddleware, (req,res)=>{
     if (err) return res.status(500).json({error:err.message});
     const formatted = rows.map(row => {
       const outgoing = row.from_user === id;
-      const counterpartyName = outgoing ? (row.to_username || row.to_account) : (row.from_username || row.to_account);
+      const counterpartyName = outgoing
+        ? (row.to_username_display || row.to_username || row.to_account)
+        : (row.from_username_display || row.from_username || row.to_account);
       return {
         id: row.id,
         amount: row.amount,
@@ -220,8 +272,17 @@ app.get('/api/transactions', authMiddleware, (req,res)=>{
 
 // lookup user by username or id
 app.get('/api/users/:identifier', authMiddleware, (req,res)=>{
-  const ident = req.params.identifier;
-  db.get('SELECT id,username,email,balance FROM users WHERE username = ? OR id = ?', [ident,ident], (err,row)=>{
+  const identRaw = normalize(req.params.identifier);
+  const identLower = identRaw.toLowerCase();
+  const identId = Number(identRaw);
+  const params = [identLower, identLower];
+  let query = 'SELECT id,username,username_display AS usernameDisplay,email,balance FROM users WHERE LOWER(username) = ? OR LOWER(email) = ?';
+  if (Number.isInteger(identId)) {
+    query += ' OR id = ?';
+    params.push(identId);
+  }
+
+  db.get(query, params, (err,row)=>{
     if (err) return res.status(500).json({error:err.message});
     if (!row) return res.status(404).json({error:'user not found'});
     res.json({user:row});
