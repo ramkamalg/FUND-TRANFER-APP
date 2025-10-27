@@ -53,7 +53,7 @@
         </div>
       </div>
 
-      <div class="container">
+  <div class="container">
         <div class="notification is-primary">
           <strong>centered</strong> on desktop and larger viewports.
         </div>
@@ -68,6 +68,33 @@
       <span> </span>
       <button class="button is-info is-rounded" disabled><i class="fas fa-eye" ></i><span></span>View Outlet</button>
       </div>
+
+      <!-- Simple transfer UI -->
+      <section class="section">
+        <div class="container">
+          <h3 class="title">Transfer funds</h3>
+          <div class="field">
+            <label class="label">To (username)</label>
+            <div class="control">
+              <input class="input" type="text" id="to_account" placeholder="recipient username">
+            </div>
+          </div>
+          <div class="field">
+            <label class="label">Amount</label>
+            <div class="control">
+              <input class="input" type="number" id="amount" placeholder="Amount">
+            </div>
+          </div>
+          <div class="field">
+            <div class="control">
+              <button class="button is-primary" id="transferBtn">Send</button>
+            </div>
+          </div>
+
+          <h4 class="title is-4">My transactions</h4>
+          <div id="txList">Loading…</div>
+        </div>
+      </section>
 
       <div class="modal" id="modal">
         <div class="modal-background"></div>

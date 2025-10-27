@@ -288,3 +288,55 @@ document.getElementById('select').onclick = function(){
 
    
 }
+
+async function api(path, opts={}){
+  const token = localStorage.getItem('ft_token');
+  const headers = opts.headers||{};
+  headers['Content-Type'] = 'application/json';
+  if (token) headers['Authorization'] = 'Bearer ' + token;
+  const res = await fetch(path, Object.assign({}, opts, {headers}));
+  return res;
+}
+
+async function loadProfile(){
+  try{
+    const res = await api('/api/me');
+    if (!res.ok){ document.getElementById('txList').innerText = 'Not authenticated'; return; }
+    const data = await res.json();
+    const user = data.user;
+    // show basic info in page title
+    document.title = (user.username || 'User') + ' — Fund Transfer';
+  }catch(e){ console.error(e); }
+}
+
+async function loadTxs(){
+  try{
+    const res = await api('/api/transactions');
+    if (!res.ok) return document.getElementById('txList').innerText = 'Failed to load transactions';
+    const data = await res.json();
+    const list = data.transactions;
+    const el = document.getElementById('txList');
+    if (!list || list.length===0) return el.innerHTML = '<p>No transactions yet.</p>';
+    el.innerHTML = '<table class="table is-fullwidth"><thead><tr><th>ID</th><th>From</th><th>To</th><th>Amount</th><th>When</th></tr></thead><tbody>' +
+      list.map(tx => `<tr><td>${tx.id}</td><td>${tx.from_user||''}</td><td>${tx.to_account||''}</td><td>${tx.amount}</td><td>${tx.created_at}</td></tr>`).join('') +
+      '</tbody></table>';
+  }catch(e){ console.error(e); }
+}
+
+document.getElementById('transferBtn').addEventListener('click', async ()=>{
+  const to_account = document.getElementById('to_account').value;
+  const amount = document.getElementById('amount').value;
+  if (!to_account || !amount) return alert('enter recipient and amount');
+  try{
+    const res = await api('/api/transfer', {method:'POST', body: JSON.stringify({to_account, amount})});
+    const data = await res.json();
+    if (!res.ok) return alert(data.error || 'Transfer failed');
+    alert('Transfer successful');
+    loadTxs();
+  }catch(e){ console.error(e); alert('Network error'); }
+});
+
+window.addEventListener('DOMContentLoaded', async ()=>{
+  await loadProfile();
+  await loadTxs();
+});
