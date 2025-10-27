@@ -289,56 +289,157 @@ document.getElementById('select').onclick = function(){
    
 }
 
-async function api(path, opts={}){
+const statusEl = document.getElementById('statusMessage');
+const balanceEl = document.getElementById('balanceDisplay');
+const userDisplayEl = document.getElementById('userDisplay');
+const txBodyEl = document.getElementById('txBody');
+const transferBtn = document.getElementById('transferBtn');
+const refreshBtn = document.getElementById('refreshBtn');
+
+const currencyFormatter = new Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD' });
+const formatAmount = (val, fallback) => {
+  const numeric = Number(val);
+  if (!Number.isFinite(numeric)) return fallback || val;
+  try {
+    return currencyFormatter.format(numeric);
+  } catch (_) {
+    return numeric.toFixed(2);
+  }
+};
+
+function setStatus(message, type = 'is-info') {
+  if (!statusEl) return;
+  statusEl.textContent = message;
+  statusEl.className = `notification ${type}`;
+  statusEl.classList.remove('is-hidden');
+}
+
+function clearStatus() {
+  if (!statusEl) return;
+  statusEl.classList.add('is-hidden');
+  statusEl.textContent = '';
+}
+
+function handleUnauthorized() {
+  localStorage.removeItem('ft_token');
+  window.location.href = 'loginpage.html';
+}
+
+async function api(path, opts = {}) {
   const token = localStorage.getItem('ft_token');
-  const headers = opts.headers||{};
+  const headers = opts.headers || {};
   headers['Content-Type'] = 'application/json';
   if (token) headers['Authorization'] = 'Bearer ' + token;
-  const res = await fetch(path, Object.assign({}, opts, {headers}));
+  const res = await fetch(path, Object.assign({}, opts, { headers }));
+  if (res.status === 401) {
+    handleUnauthorized();
+    throw new Error('Unauthorized');
+  }
   return res;
 }
 
-async function loadProfile(){
-  try{
+function renderTransactions(transactions) {
+  if (!txBodyEl) return;
+  if (!transactions || transactions.length === 0) {
+    txBodyEl.innerHTML = '<tr><td colspan="6">No transactions yet.</td></tr>';
+    return;
+  }
+  const rows = transactions.map((tx, index) => {
+    const amount = tx.amountFormatted || formatAmount(tx.amount, tx.amount);
+    const directionTag = tx.direction === 'outgoing'
+      ? '<span class="tag is-warning">Sent</span>'
+      : '<span class="tag is-success">Received</span>';
+    const date = tx.createdAtISO ? new Date(tx.createdAtISO).toLocaleString() : tx.createdAt;
+    const note = tx.note ? tx.note.replace(/</g, '&lt;') : '';
+    return `<tr>
+      <td>${index + 1}</td>
+      <td>${directionTag}</td>
+      <td>${tx.counterparty || '—'}</td>
+      <td>${amount}</td>
+      <td>${note}</td>
+      <td>${date}</td>
+    </tr>`;
+  });
+  txBodyEl.innerHTML = rows.join('');
+}
+
+async function loadProfile() {
+  try {
     const res = await api('/api/me');
-    if (!res.ok){ document.getElementById('txList').innerText = 'Not authenticated'; return; }
     const data = await res.json();
-    const user = data.user;
-    // show basic info in page title
-    document.title = (user.username || 'User') + ' — Fund Transfer';
-    const balEl = document.getElementById('balanceDisplay');
-    if (balEl) balEl.innerText = 'Balance: ' + (user.balance!=null ? user.balance : '—');
-  }catch(e){ console.error(e); }
+    const user = data.user || {};
+    if (userDisplayEl) {
+      userDisplayEl.textContent = user.username || user.email || 'Unknown user';
+    }
+    if (balanceEl) {
+      const formatted = formatAmount(user.balance, user.balance);
+      balanceEl.textContent = `Balance: ${formatted}`;
+    }
+  } catch (err) {
+    console.error(err);
+    setStatus('Unable to load profile details.', 'is-danger');
+  }
 }
 
-async function loadTxs(){
-  try{
+async function loadTransactions() {
+  try {
     const res = await api('/api/transactions');
-    if (!res.ok) return document.getElementById('txList').innerText = 'Failed to load transactions';
     const data = await res.json();
-    const list = data.transactions;
-    const el = document.getElementById('txList');
-    if (!list || list.length===0) return el.innerHTML = '<p>No transactions yet.</p>';
-    el.innerHTML = '<table class="table is-fullwidth"><thead><tr><th>ID</th><th>From</th><th>To</th><th>Amount</th><th>When</th></tr></thead><tbody>' +
-      list.map(tx => `<tr><td>${tx.id}</td><td>${tx.from_user||''}</td><td>${tx.to_account||''}</td><td>${tx.amount}</td><td>${tx.created_at}</td></tr>`).join('') +
-      '</tbody></table>';
-  }catch(e){ console.error(e); }
+    renderTransactions(data.transactions);
+  } catch (err) {
+    console.error(err);
+    setStatus('Unable to load transactions.', 'is-danger');
+  }
 }
 
-document.getElementById('transferBtn').addEventListener('click', async ()=>{
-  const to_account = document.getElementById('to_account').value;
-  const amount = document.getElementById('amount').value;
-  if (!to_account || !amount) return alert('enter recipient and amount');
-  try{
-    const res = await api('/api/transfer', {method:'POST', body: JSON.stringify({to_account, amount})});
-    const data = await res.json();
-    if (!res.ok) return alert(data.error || 'Transfer failed');
-    alert('Transfer successful');
-    loadTxs();
-  }catch(e){ console.error(e); alert('Network error'); }
-});
+async function submitTransfer() {
+  if (!transferBtn) return;
+  const to_account = document.getElementById('to_account').value.trim();
+  const amount = Number(document.getElementById('amount').value);
+  const note = document.getElementById('note').value.trim();
 
-window.addEventListener('DOMContentLoaded', async ()=>{
+  if (!to_account || !Number.isFinite(amount) || amount <= 0) {
+    setStatus('Please supply a valid recipient and amount greater than zero.', 'is-warning');
+    return;
+  }
+
+  transferBtn.disabled = true;
+  clearStatus();
+  try {
+    const res = await api('/api/transfer', {
+      method: 'POST',
+      body: JSON.stringify({ to_account, amount, note })
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      setStatus(data.error || 'Transfer failed.', 'is-danger');
+    } else {
+      setStatus(`Transfer successful. New balance: ${data.balanceFormatted || formatAmount(data.balance)}`, 'is-success');
+      document.getElementById('amount').value = '';
+      document.getElementById('note').value = '';
+      await loadProfile();
+      await loadTransactions();
+    }
+  } catch (err) {
+    console.error(err);
+    setStatus('Network error while attempting transfer.', 'is-danger');
+  } finally {
+    transferBtn.disabled = false;
+  }
+}
+
+window.addEventListener('DOMContentLoaded', async () => {
   await loadProfile();
-  await loadTxs();
+  await loadTransactions();
+
+  if (transferBtn) {
+    transferBtn.addEventListener('click', submitTransfer);
+  }
+  if (refreshBtn) {
+    refreshBtn.addEventListener('click', async () => {
+      clearStatus();
+      await loadProfile();
+      await loadTransactions();
+    });
+  }
 });
