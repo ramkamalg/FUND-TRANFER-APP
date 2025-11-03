@@ -53,7 +53,7 @@
         </div>
       </div>
 
-      <div class="container">
+  <div class="container">
         <div class="notification is-primary">
           <strong>centered</strong> on desktop and larger viewports.
         </div>
@@ -68,6 +68,79 @@
       <span> </span>
       <button class="button is-info is-rounded" disabled><i class="fas fa-eye" ></i><span></span>View Outlet</button>
       </div>
+
+      <!-- Simple transfer UI -->
+      <section class="section">
+        <div class="container">
+          <div class="columns">
+            <div class="column is-half">
+              <h3 class="title is-4">Transfer funds</h3>
+              <div class="box">
+                <p class="subtitle is-6">
+                  Signed in as <span id="userDisplay">—</span> · <strong id="balanceDisplay">Balance: —</strong>
+                </p>
+                <div id="statusMessage" class="notification is-hidden"></div>
+                <div class="field">
+                  <label class="label">To (username)</label>
+                  <div class="control has-icons-left">
+                    <input class="input" type="text" id="to_account" placeholder="Recipient username" required>
+                    <span class="icon is-small is-left">
+                      <i class="fas fa-user"></i>
+                    </span>
+                  </div>
+                </div>
+                <div class="field">
+                  <label class="label">Amount</label>
+                  <div class="control has-icons-left">
+                    <input class="input" type="number" min="0.01" step="0.01" id="amount" placeholder="Amount" required>
+                    <span class="icon is-small is-left">
+                      <i class="fas fa-coins"></i>
+                    </span>
+                  </div>
+                </div>
+                <div class="field">
+                  <label class="label">Notes (optional)</label>
+                  <div class="control">
+                    <textarea class="textarea" id="note" rows="2" placeholder="Reason for transfer"></textarea>
+                  </div>
+                </div>
+                <div class="field is-grouped is-justify-content-space-between">
+                  <div class="control">
+                    <button class="button is-primary" id="transferBtn">Send</button>
+                  </div>
+                  <div class="control">
+                    <button class="button is-light" id="refreshBtn">Refresh</button>
+                  </div>
+                  <div class="control">
+                    <button class="button is-light" onclick="window.ftLogout && window.ftLogout()">Logout</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="column">
+              <h3 class="title is-4">Transaction history</h3>
+              <div class="table-container">
+                <table class="table is-striped is-fullwidth" id="txTable">
+                  <thead>
+                    <tr>
+                      <th>#</th>
+                      <th>Direction</th>
+                      <th>Counterparty</th>
+                      <th>Amount</th>
+                      <th>Note</th>
+                      <th>Date</th>
+                    </tr>
+                  </thead>
+                  <tbody id="txBody">
+                    <tr><td colspan="6">Loading…</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
 
       <div class="modal" id="modal">
         <div class="modal-background"></div>
